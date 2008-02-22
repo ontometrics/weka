@@ -33,6 +33,7 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.beans.beancontext.BeanContext;
 import java.io.IOException;
+import java.io.ObjectStreamException;
 import java.util.Enumeration;
 import java.util.Vector;
 
@@ -42,14 +43,14 @@ import javax.swing.JButton;
  * Loads data sets using weka.core.converter classes
  *
  * @author <a href="mailto:mhall@cs.waikato.ac.nz">Mark Hall</a>
- * @version $Revision: 1.16 $
+ * @version $Revision: 1.19 $
  * @since 1.0
  * @see AbstractDataSource
  * @see UserRequestAcceptor
  */
 public class Loader
   extends AbstractDataSource 
-  implements UserRequestAcceptor, WekaWrapper,
+  implements Startable, UserRequestAcceptor, WekaWrapper,
 	     EventConstraints {
 
   /** for serialization */
@@ -157,6 +158,7 @@ public class Loader
 	  }
 	  m_visual.setStatic();
 	} else {
+          m_Loader.reset();
 	  m_dataSet = m_Loader.getDataSet();
 	  m_visual.setStatic();
 	  m_visual.setText(m_dataSet.relationName());
@@ -411,6 +413,15 @@ public class Loader
   }
 
   /**
+   * Start loading
+   *
+   * @exception Exception if something goes wrong
+   */
+  public void start() throws Exception {
+    startLoading();
+  }
+
+  /**
    * Returns true if the named event can be generated at this time
    *
    * @param eventName the event
@@ -457,10 +468,11 @@ public class Loader
     m_dataSetEventTargets ++;
     // pass on any current instance format
     try{
-        if(m_dbSet){
-            m_dataFormat = m_Loader.getStructure();
-            m_dbSet = false;
-        }
+      if((m_Loader instanceof DatabaseLoader && m_dbSet && m_dataFormat == null) || 
+         (!(m_Loader instanceof DatabaseLoader) && m_dataFormat == null)) {
+        m_dataFormat = m_Loader.getStructure();
+        m_dbSet = false;
+      }
     }catch(Exception ex){
     }
     notifyStructureAvailable(m_dataFormat);
@@ -485,13 +497,14 @@ public class Loader
     super.addInstanceListener(dsl);
     m_instanceEventTargets ++;
     try{
-        if(m_dbSet){
-            m_dataFormat = m_Loader.getStructure();
-            m_dbSet = false;
-        }
+      if((m_Loader instanceof DatabaseLoader && m_dbSet && m_dataFormat == null) || 
+         (!(m_Loader instanceof DatabaseLoader) && m_dataFormat == null)) {
+        m_dataFormat = m_Loader.getStructure();
+        m_dbSet = false;
+      }
     }catch(Exception ex){
     }
-    // pass on any current instance format
+    // pass on any current instance format      
     notifyStructureAvailable(m_dataFormat);
   }
   
@@ -524,6 +537,17 @@ public class Loader
     } catch (Exception ex) {
       ex.printStackTrace();
     }
+  }
+  
+  private Object readResolve() throws ObjectStreamException {
+    // try and reset the Loader
+    if (m_Loader != null) {
+      try {
+        m_Loader.reset();
+      } catch (Exception ex) {
+      }
+    }
+    return this;
   }
 }
 

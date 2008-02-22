@@ -129,34 +129,34 @@ import java.util.Vector;
  * @author Stuart Inglis (stuart@reeltwo.com)
  * @author Gordon Paynter (gordon.paynter@ucr.edu)
  * @author Asrhaf M. Kibriya (amk14@cs.waikato.ac.nz)
- * @version $Revision: 1.20 $ 
+ * @version $Revision: 1.23 $ 
  * @see Stopwords
  */
 public class StringToWordVector 
   extends Filter
   implements UnsupervisedFilter, OptionHandler {
 
-  /** for serialization */
+  /** for serialization. */
   static final long serialVersionUID = 8249106275278565424L;
 
-  /** Range of columns to convert to word vectors */
+  /** Range of columns to convert to word vectors. */
   protected Range m_SelectedRange = new Range("first-last");
 
-  /** Contains a mapping of valid words to attribute indexes */
+  /** Contains a mapping of valid words to attribute indexes. */
   private TreeMap m_Dictionary = new TreeMap();
 
   /** True if output instances should contain word frequency rather than boolean 0 or 1. */
   private boolean m_OutputCounts = false;
 
-  /** A String prefix for the attribute names */
+  /** A String prefix for the attribute names. */
   private String m_Prefix = "";
-  
+
   /** Contains the number of documents (instances) a particular word appears in.
-      The counts are stored with the same indexing as given by m_Dictionary.  */
+          The counts are stored with the same indexing as given by m_Dictionary.  */
   private int [] m_DocsCounts;
-  
+
   /** Contains the number of documents (instances) in the input format from 
-      which the dictionary is created. It is used in IDF transform. */
+          which the dictionary is created. It is used in IDF transform. */
   private int m_NumInstances = -1;
 
   /**
@@ -165,26 +165,31 @@ public class StringToWordVector
    * documents which will be normalized to average document length.
    */
   private double m_AvgDocLength = -1;
-  
+
   /**
    * The default number of words (per class if there is a class attribute
    * assigned) to attempt to keep.
    */
   private int m_WordsToKeep = 1000;
 
+  /**
+   * The percentage at which to periodically prune the dictionary.
+   */
+  private double m_PeriodicPruningRate = -1;
+
   /** True if word frequencies should be transformed into log(1+fi) 
-      where fi is the frequency of word i
+          where fi is the frequency of word i.
    */
   private boolean m_TFTransform;
 
   /** The normalization to apply. */
   protected int m_filterType = FILTER_NONE;
-  
-  /** normalization: No normalization */
+
+  /** normalization: No normalization. */
   public static final int FILTER_NONE = 0;
-  /** normalization: Normalize all data */
+  /** normalization: Normalize all data. */
   public static final int FILTER_NORMALIZE_ALL = 1;
-  /** normalization: Normalize test data only */
+  /** normalization: Normalize test data only. */
   public static final int FILTER_NORMALIZE_TEST_ONLY = 2;
 
   /** Specifies whether document's (instance's) word frequencies are
@@ -197,29 +202,29 @@ public class StringToWordVector
   };
 
   /** True if word frequencies should be transformed into 
-     fij*log(numOfDocs/numOfDocsWithWordi) */
+          fij*log(numOfDocs/numOfDocsWithWordi). */
   private boolean m_IDFTransform;
-  
-  /** True if all tokens should be downcased */
+
+  /** True if all tokens should be downcased. */
   private boolean m_lowerCaseTokens;
-  
+
   /** True if tokens that are on a stoplist are to be ignored. */
   private boolean m_useStoplist;  
 
-  /** the stemming algorithm */
+  /** the stemming algorithm. */
   private Stemmer m_Stemmer = new NullStemmer();
 
-  /** the minimum (per-class) word frequency */
+  /** the minimum (per-class) word frequency. */
   private int m_minTermFreq = 1;
-  
-  /** whether to operate on a per-class basis */
+
+  /** whether to operate on a per-class basis. */
   private boolean m_doNotOperateOnPerClassBasis = false;
 
   /** a file containing stopwords for using others than the default Rainbow 
-   * ones */
+   * ones. */
   private File m_Stopwords = new File(System.getProperty("user.dir"));
 
-  /** the tokenizer algorithm to use */
+  /** the tokenizer algorithm to use. */
   private Tokenizer m_Tokenizer = new WordTokenizer();
 
   /**
@@ -227,9 +232,9 @@ public class StringToWordVector
    */
   public StringToWordVector() {
   }
-  
+
   /**
-   * Returns an enumeration describing the available options
+   * Returns an enumeration describing the available options.
    *
    * @return an enumeration of all the available options
    */
@@ -259,6 +264,12 @@ public class StringToWordVector
 	+ "\tSurplus words will be discarded..\n"
 	+ "\t(default: 1000)",
 	"W", 1, "-W <number of words to keep>"));
+
+    result.addElement(new Option(
+	"\tSpecify the rate (e.g., every 10% of the input dataset) at which to periodically prune the dictionary.\n"
+	+ "\t-W prunes after creating a full dictionary. You may not have enough memory for this approach.\n"
+	+ "\t(default: no periodic pruning)",
+	"prune-rate", 1, "-prune-rate <rate as a percentage of dataset>"));
 
     result.addElement(new Option(
 	"\tTransform the word frequencies into log(1+fij)\n"+
@@ -320,7 +331,7 @@ public class StringToWordVector
   /**
    * Parses a given list of options. <p/>
    * 
-   <!-- options-start -->
+         <!-- options-start -->
    * Valid options are: <p/>
    * 
    * <pre> -C
@@ -342,6 +353,11 @@ public class StringToWordVector
    *  Specify approximate number of word fields to create.
    *  Surplus words will be discarded..
    *  (default: 1000)</pre>
+   *
+   * <pre> -prune-rate &lt;rate as a percentage of dataset&gt;
+   *  Specify the rate (e.g., every 10% of the input dataset) at which to periodically prune the dictionary.
+   *  -W prunes after creating a full dictionary. You may not have enough memory for this approach.
+   *  (default: no periodic pruning)"</pre>
    * 
    * <pre> -T
    *  Transform the word frequencies into log(1+fij)
@@ -386,14 +402,14 @@ public class StringToWordVector
    *  The tokenizing algorihtm (classname plus parameters) to use.
    *  (default: weka.core.tokenizers.WordTokenizer)</pre>
    * 
-   <!-- options-end -->
+         <!-- options-end -->
    *
    * @param options the list of options as an array of strings
    * @throws Exception if an option is not supported
    */
   public void setOptions(String[] options) throws Exception {
     String 	value;
-    
+
     value = Utils.getOption('R', options);
     if (value.length() != 0)
       setSelectedRange(value);
@@ -414,18 +430,24 @@ public class StringToWordVector
     else
       setWordsToKeep(1000);
 
+    value = Utils.getOption("prune-rate", options);
+    if (value.length() > 0)
+      setPeriodicPruning(Double.parseDouble(value));
+    else
+      setPeriodicPruning(-1);
+
     value = Utils.getOption('M', options);
     if (value.length() != 0)
       setMinTermFreq(Integer.valueOf(value).intValue());
     else
       setMinTermFreq(1);
-    
+
     setOutputWordCounts(Utils.getFlag('C', options));
 
     setTFTransform(Utils.getFlag('T',  options));
 
     setIDFTransform(Utils.getFlag('I',  options));
-    
+
     setDoNotOperateOnPerClassBasis(Utils.getFlag('O', options));
 
     String nString = Utils.getOption('N', options);
@@ -433,11 +455,11 @@ public class StringToWordVector
       setNormalizeDocLength(new SelectedTag(Integer.parseInt(nString), TAGS_FILTER));
     else
       setNormalizeDocLength(new SelectedTag(FILTER_NONE, TAGS_FILTER));
-    
+
     setLowerCaseTokens(Utils.getFlag('L', options));
-    
+
     setUseStoplist(Utils.getFlag('S', options));
-    
+
     String stemmerString = Utils.getOption("stemmer", options);
     if (stemmerString.length() == 0) {
       setStemmer(null);
@@ -445,12 +467,12 @@ public class StringToWordVector
     else {
       String[] stemmerSpec = Utils.splitOptions(stemmerString);
       if (stemmerSpec.length == 0)
-        throw new Exception("Invalid stemmer specification string");
+	throw new Exception("Invalid stemmer specification string");
       String stemmerName = stemmerSpec[0];
       stemmerSpec[0] = "";
       Stemmer stemmer = (Stemmer) Class.forName(stemmerName).newInstance();
       if (stemmer instanceof OptionHandler)
-        ((OptionHandler) stemmer).setOptions(stemmerSpec);
+	((OptionHandler) stemmer).setOptions(stemmerSpec);
       setStemmer(stemmer);
     }
 
@@ -467,12 +489,12 @@ public class StringToWordVector
     else {
       String[] tokenizerSpec = Utils.splitOptions(tokenizerString);
       if (tokenizerSpec.length == 0)
-        throw new Exception("Invalid tokenizer specification string");
+	throw new Exception("Invalid tokenizer specification string");
       String tokenizerName = tokenizerSpec[0];
       tokenizerSpec[0] = "";
       Tokenizer tokenizer = (Tokenizer) Class.forName(tokenizerName).newInstance();
       if (tokenizer instanceof OptionHandler)
-        ((OptionHandler) tokenizer).setOptions(tokenizerSpec);
+	((OptionHandler) tokenizer).setOptions(tokenizerSpec);
       setTokenizer(tokenizer);
     }
   }
@@ -500,6 +522,9 @@ public class StringToWordVector
 
     result.add("-W"); 
     result.add(String.valueOf(getWordsToKeep()));
+
+    result.add("-prune-rate"); 
+    result.add(String.valueOf(getPeriodicPruning()));
 
     if (getOutputWordCounts())
       result.add("-C");
@@ -559,22 +584,22 @@ public class StringToWordVector
   public StringToWordVector(int wordsToKeep) {
     m_WordsToKeep = wordsToKeep;
   }
-  
+
   /** 
    * Used to store word counts for dictionary selection based on 
    * a threshold.
    */
   private class Count 
-    implements Serializable {
+  implements Serializable {
 
-    /** for serialization */
+    /** for serialization. */
     static final long serialVersionUID = 2157223818584474321L;
-    
-    /** the counts */
+
+    /** the counts. */
     public int count, docCount;
-    
+
     /**
-     * the constructor
+     * the constructor.
      * 
      * @param c the count
      */
@@ -595,12 +620,12 @@ public class StringToWordVector
     // attributes
     result.enableAllAttributes();
     result.enable(Capability.MISSING_VALUES);
-    
+
     // class
     result.enableAllClasses();
     result.enable(Capability.MISSING_CLASS_VALUES);
     result.enable(Capability.NO_CLASS);
-    
+
     return result;
   }
 
@@ -615,7 +640,7 @@ public class StringToWordVector
    * successfully
    */
   public boolean setInputFormat(Instances instanceInfo) 
-    throws Exception {
+  throws Exception {
 
     super.setInputFormat(instanceInfo);
     m_SelectedRange.setUpper(instanceInfo.numAttributes() - 1);
@@ -685,7 +710,7 @@ public class StringToWordVector
       for(int i=0; i < m_NumInstances; i++) {
 	firstCopy = convertInstancewoDocNorm(getInputFormat().instance(i), fv);
       }
-      
+
       // Need to compute average document length if necessary
       if (m_filterType != FILTER_NONE) {
 	m_AvgDocLength = 0;
@@ -724,18 +749,19 @@ public class StringToWordVector
   }
 
   /**
-   * Returns a string describing this filter
+   * Returns a string describing this filter.
+   * 
    * @return a description of the filter suitable for
    * displaying in the explorer/experimenter gui
    */  
   public String globalInfo() {
     return 
-        "Converts String attributes into a set of attributes representing "
-      + "word occurrence (depending on the tokenizer) information from the "
-      + "text contained in the strings. The set of words (attributes) is "
-      + "determined by the first batch filtered (typically training data).";
+    "Converts String attributes into a set of attributes representing "
+    + "word occurrence (depending on the tokenizer) information from the "
+    + "text contained in the strings. The set of words (attributes) is "
+    + "determined by the first batch filtered (typically training data).";
   }  
-  
+
   /**
    * Gets whether output instances contain 0 or 1 indicating word
    * presence, or word counts.
@@ -757,13 +783,14 @@ public class StringToWordVector
   }
 
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
+   * 
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String outputWordCountsTipText() {
-      return "Output word counts rather than boolean 0 or 1"+
-             "(indicating presence or absence of a word).";
+    return "Output word counts rather than boolean 0 or 1"+
+    "(indicating presence or absence of a word).";
   }
 
   /**
@@ -774,7 +801,7 @@ public class StringToWordVector
   public Range getSelectedRange() {
     return m_SelectedRange;
   }
-    
+
   /**
    * Set the value of m_SelectedRange.
    *
@@ -785,20 +812,20 @@ public class StringToWordVector
   }
 
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
    *
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String attributeIndicesTipText() {
     return "Specify range of attributes to act on."
-      + " This is a comma separated list of attribute indices, with"
-      + " \"first\" and \"last\" valid values. Specify an inclusive"
-      + " range with \"-\". E.g: \"first-3,5,6-10,last\".";
+    + " This is a comma separated list of attribute indices, with"
+    + " \"first\" and \"last\" valid values. Specify an inclusive"
+    + " range with \"-\". E.g: \"first-3,5,6-10,last\".";
   }
 
   /**
-   * Gets the current range selection
+   * Gets the current range selection.
    *
    * @return a string containing a comma separated list of ranges
    */
@@ -833,19 +860,19 @@ public class StringToWordVector
   }
 
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
    *
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String invertSelectionTipText() {
     return "Set attribute selection mode. If false, only selected"
-      + " attributes in the range will be worked on; if"
-      + " true, only non-selected attributes will be processed.";
+    + " attributes in the range will be worked on; if"
+    + " true, only non-selected attributes will be processed.";
   }
 
   /**
-   * Gets whether the supplied columns are to be processed or skipped
+   * Gets whether the supplied columns are to be processed or skipped.
    *
    * @return true if the supplied columns will be kept
    */
@@ -870,7 +897,7 @@ public class StringToWordVector
   public String getAttributeNamePrefix() {
     return m_Prefix;
   }
-    
+
   /**
    * Set the attribute name prefix.
    *
@@ -881,13 +908,14 @@ public class StringToWordVector
   }
 
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
+   * 
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String attributeNamePrefixTipText() {
-      return "Prefix for the created attribute names. "+
-             "(default: \"\")";
+    return "Prefix for the created attribute names. "+
+    "(default: \"\")";
   }
 
   /**
@@ -900,7 +928,7 @@ public class StringToWordVector
   public int getWordsToKeep() {
     return m_WordsToKeep;
   }
-  
+
   /**
    * Sets the number of words (per class if there is a class attribute
    * assigned) to attempt to keep.
@@ -911,15 +939,48 @@ public class StringToWordVector
   public void setWordsToKeep(int newWordsToKeep) {
     m_WordsToKeep = newWordsToKeep;
   }
-  
+
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
+   * 
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String wordsToKeepTipText() {
-      return "The number of words (per class if there is a class attribute "+
-             "assigned) to attempt to keep.";
+    return "The number of words (per class if there is a class attribute "+
+    "assigned) to attempt to keep.";
+  }
+
+  /**
+   * Gets the rate at which the dictionary is periodically pruned, as a 
+   * percentage of the dataset size.
+   *
+   * @return the rate at which the dictionary is periodically pruned
+   */
+  public double getPeriodicPruning() {
+    return m_PeriodicPruningRate;
+  }
+
+  /**
+   * Sets the rate at which the dictionary is periodically pruned, as a 
+   * percentage of the dataset size.
+   *
+   * @param newPeriodicPruning the rate at which the dictionary is periodically pruned
+   */
+  public void setPeriodicPruning(double newPeriodicPruning) {
+    m_PeriodicPruningRate = newPeriodicPruning;
+  }
+
+  /**
+   * Returns the tip text for this property.
+   * 
+   * @return tip text for this property suitable for
+   * displaying in the explorer/experimenter gui
+   */
+  public String periodicPruningTipText() {
+    return "Specify the rate (x% of the input dataset) at which to periodically prune the dictionary. "
+    + "wordsToKeep prunes after creating a full dictionary. You may not have enough "
+    + "memory for this approach.";
   }
 
   /** Gets whether if the word frequencies should be transformed into
@@ -928,29 +989,30 @@ public class StringToWordVector
    * @return true if word frequencies are to be transformed.
    */
   public boolean getTFTransform() {
-      return this.m_TFTransform;
+    return this.m_TFTransform;
   }
-  
+
   /** Sets whether if the word frequencies should be transformed into
    *  log(1+fij) where fij is the frequency of word i in document(instance) j.
    *
    * @param TFTransform true if word frequencies are to be transformed.
    */
   public void setTFTransform(boolean TFTransform) {
-      this.m_TFTransform = TFTransform;
+    this.m_TFTransform = TFTransform;
   }
-  
+
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
+   * 
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String TFTransformTipText() {
-      return "Sets whether if the word frequencies should be transformed into:\n "+
-             "   log(1+fij) \n"+
-             "       where fij is the frequency of word i in document (instance) j.";
+    return "Sets whether if the word frequencies should be transformed into:\n "+
+    "   log(1+fij) \n"+
+    "       where fij is the frequency of word i in document (instance) j.";
   }
-  
+
   /** Sets whether if the word frequencies in a document should be transformed
    * into: <br>
    * fij*log(num of Docs/num of Docs with word i) <br>
@@ -959,9 +1021,9 @@ public class StringToWordVector
    * @return true if the word frequencies are to be transformed.
    */
   public boolean getIDFTransform() {
-      return this.m_IDFTransform;
+    return this.m_IDFTransform;
   }
-  
+
   /** Sets whether if the word frequencies in a document should be transformed
    * into: <br>
    * fij*log(num of Docs/num of Docs with word i) <br>
@@ -970,22 +1032,23 @@ public class StringToWordVector
    * @param IDFTransform true if the word frequecies are to be transformed
    */
   public void setIDFTransform(boolean IDFTransform) {
-      this.m_IDFTransform = IDFTransform;
+    this.m_IDFTransform = IDFTransform;
   }
-  
+
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
+   * 
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String IDFTransformTipText() {
-      return "Sets whether if the word frequencies in a document should be "+
-             "transformed into: \n"+
-             "   fij*log(num of Docs/num of Docs with word i) \n"+
-             "      where fij is the frequency of word i in document (instance) j.";
+    return "Sets whether if the word frequencies in a document should be "+
+    "transformed into: \n"+
+    "   fij*log(num of Docs/num of Docs with word i) \n"+
+    "      where fij is the frequency of word i in document (instance) j.";
   }
 
-  
+
   /** Gets whether if the word frequencies for a document (instance) should
    *  be normalized or not.
    *
@@ -995,38 +1058,38 @@ public class StringToWordVector
 
     return new SelectedTag(m_filterType, TAGS_FILTER);
   }
-  
+
   /** Sets whether if the word frequencies for a document (instance) should
    *  be normalized or not.
    *
    * @param newType the new type.
    */
   public void setNormalizeDocLength(SelectedTag newType) {
-    
+
     if (newType.getTags() == TAGS_FILTER) {
       m_filterType = newType.getSelectedTag().getID();
     }
   }
 
   /**
-   * Returns the tip text for this property
+   * Returns the tip text for this property.
    *
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
   public String normalizeDocLengthTipText() {
-      return "Sets whether if the word frequencies for a document (instance) "+
-             "should be normalized or not.";
+    return "Sets whether if the word frequencies for a document (instance) "+
+    "should be normalized or not.";
   }
-  
+
   /** Gets whether if the tokens are to be downcased or not.
    *
    * @return true if the tokens are to be downcased.
    */
   public boolean getLowerCaseTokens() {
-      return this.m_lowerCaseTokens;
+    return this.m_lowerCaseTokens;
   }
-  
+
   /** Sets whether if the tokens are to be downcased or not. (Doesn't affect
    * non-alphabetic characters in tokens).
    *
@@ -1034,7 +1097,7 @@ public class StringToWordVector
    * to be formed.
    */
   public void setLowerCaseTokens(boolean downCaseTokens) {
-      this.m_lowerCaseTokens = downCaseTokens;
+    this.m_lowerCaseTokens = downCaseTokens;
   }
 
   /**
@@ -1044,10 +1107,10 @@ public class StringToWordVector
    * displaying in the explorer/experimenter gui
    */
   public String doNotOperateOnPerClassBasisTipText() {
-      return "If this is set, the maximum number of words and the "
-	+ "minimum term frequency is not enforced on a per-class "
-	+ "basis but based on the documents in all the classes "
-	+  "(even if a class attribute is set).";
+    return "If this is set, the maximum number of words and the "
+    + "minimum term frequency is not enforced on a per-class "
+    + "basis but based on the documents in all the classes "
+    +  "(even if a class attribute is set).";
   }
 
   /**
@@ -1073,8 +1136,8 @@ public class StringToWordVector
    * displaying in the explorer/experimenter gui
    */
   public String minTermFreqTipText() {
-      return "Sets the minimum term frequency. This is enforced "
-	+ "on a per-class basis.";
+    return "Sets the minimum term frequency. This is enforced "
+    + "on a per-class basis.";
   }
 
   /**
@@ -1092,7 +1155,7 @@ public class StringToWordVector
   public void setMinTermFreq(int newMinTermFreq) {
     this.m_minTermFreq = newMinTermFreq;
   }
-  
+
   /**
    * Returns the tip text for this property.
    *
@@ -1100,8 +1163,8 @@ public class StringToWordVector
    * displaying in the explorer/experimenter gui
    */
   public String lowerCaseTokensTipText() {
-      return "If set then all the word tokens are converted to lower case "+
-             "before being added to the dictionary.";
+    return "If set then all the word tokens are converted to lower case "+
+    "before being added to the dictionary.";
   }
 
   /** Gets whether if the words on the stoplist are to be ignored (The stoplist
@@ -1110,9 +1173,9 @@ public class StringToWordVector
    * @return true if the words on the stoplist are to be ignored.
    */
   public boolean getUseStoplist() {
-      return m_useStoplist;
+    return m_useStoplist;
   }  
-  
+
   /** Sets whether if the words that are on a stoplist are to be ignored (The
    * stop list is in weka.core.StopWords).
    *
@@ -1120,9 +1183,9 @@ public class StringToWordVector
    * ignored.
    */
   public void setUseStoplist(boolean useStoplist) {
-      m_useStoplist = useStoplist;
+    m_useStoplist = useStoplist;
   }  
-  
+
   /**
    * Returns the tip text for this property.
    *
@@ -1130,12 +1193,12 @@ public class StringToWordVector
    * displaying in the explorer/experimenter gui
    */
   public String useStoplistTipText() {
-      return "Ignores all the words that are on the stoplist, if set to true.";
+    return "Ignores all the words that are on the stoplist, if set to true.";
   } 
 
   /**
    * the stemming algorithm to use, null means no stemming at all (i.e., the
-   * NullStemmer is used)
+   * NullStemmer is used).
    *
    * @param value     the configured stemming algorithm, or null
    * @see             NullStemmer
@@ -1201,9 +1264,9 @@ public class StringToWordVector
   public String stopwordsTipText() {
     return "The file containing the stopwords (if this is a directory then the default ones are used).";
   }
-  
+
   /**
-   * the tokenizer algorithm to use
+   * the tokenizer algorithm to use.
    *
    * @param value     the configured tokenizing algorithm
    */
@@ -1231,36 +1294,36 @@ public class StringToWordVector
   }
 
   /**
-   * sorts an array
+   * sorts an array.
    * 
    * @param array the array to sort
    */
   private static void sortArray(int [] array) {
-      
+
     int i, j, h, N = array.length - 1;
-	
+
     for (h = 1; h <= N / 9; h = 3 * h + 1); 
-	
+
     for (; h > 0; h /= 3) {
       for (i = h + 1; i <= N; i++) { 
-        int v = array[i]; 
-        j = i; 
-        while (j > h && array[j - h] > v ) { 
-          array[j] = array[j - h]; 
-          j -= h; 
-        } 
-        array[j] = v; 
+	int v = array[i]; 
+	j = i; 
+	while (j > h && array[j - h] > v ) { 
+	  array[j] = array[j - h]; 
+	  j -= h; 
+	} 
+	array[j] = v; 
       } 
     }
   }
 
   /**
-   * determines the selected range
+   * determines the selected range.
    */
   private void determineSelectedRange() {
-    
+
     Instances inputFormat = getInputFormat();
-    
+
     // Calculate the default set of fields to convert
     if (m_SelectedRange == null) {
       StringBuffer fields = new StringBuffer();
@@ -1271,7 +1334,7 @@ public class StringToWordVector
       m_SelectedRange = new Range(fields.toString());
     }
     m_SelectedRange.setUpper(inputFormat.numAttributes() - 1);
-    
+
     // Prevent the user from converting non-string fields
     StringBuffer fields = new StringBuffer();
     for (int j = 0; j < inputFormat.numAttributes(); j++) { 
@@ -1284,9 +1347,9 @@ public class StringToWordVector
 
     // System.err.println("Selected Range: " + getSelectedRange().getRanges()); 
   }
-  
+
   /**
-   * determines the dictionary
+   * determines the dictionary.
    */
   private void determineDictionary() {
     // initialize stopwords
@@ -1318,6 +1381,8 @@ public class StringToWordVector
     determineSelectedRange();
 
     // Tokenize all training text into an orderedMap of "words".
+    long pruneRate = 
+      Math.round((m_PeriodicPruningRate/100.0)*getInputFormat().numInstances());
     for (int i = 0; i < getInputFormat().numInstances(); i++) {
       Instance instance = getInputFormat().instance(i);
       int vInd = 0;
@@ -1328,36 +1393,36 @@ public class StringToWordVector
       // Iterate through all relevant string attributes of the current instance
       Hashtable h = new Hashtable();
       for (int j = 0; j < instance.numAttributes(); j++) { 
-        if (m_SelectedRange.isInRange(j) && (instance.isMissing(j) == false)) {
+	if (m_SelectedRange.isInRange(j) && (instance.isMissing(j) == false)) {
 
 	  // Get tokenizer
-          m_Tokenizer.tokenize(instance.stringValue(j));
-          
+	  m_Tokenizer.tokenize(instance.stringValue(j));
+
 	  // Iterate through tokens, perform stemming, and remove stopwords
 	  // (if required)
-          while (m_Tokenizer.hasMoreElements()) {
-            String word = ((String)m_Tokenizer.nextElement()).intern();
-            
-            if(this.m_lowerCaseTokens==true)
-                word = word.toLowerCase();
-            
-            word = m_Stemmer.stem(word);
-            
-            if(this.m_useStoplist==true)
-                if(stopwords.is(word))
-                    continue;
-            
-            if(!(h.contains(word)))
-                h.put(word, new Integer(0));
+	  while (m_Tokenizer.hasMoreElements()) {
+	    String word = ((String)m_Tokenizer.nextElement()).intern();
 
-            Count count = (Count)dictionaryArr[vInd].get(word);
-            if (count == null) {
-              dictionaryArr[vInd].put(word, new Count(1));
-            } else {
-	      count.count ++;                
-            }
-          }          
-        }
+	    if(this.m_lowerCaseTokens==true)
+	      word = word.toLowerCase();
+
+	    word = m_Stemmer.stem(word);
+
+	    if(this.m_useStoplist==true)
+	      if(stopwords.is(word))
+		continue;
+
+	    if(!(h.contains(word)))
+	      h.put(word, new Integer(0));
+
+	    Count count = (Count)dictionaryArr[vInd].get(word);
+	    if (count == null) {
+	      dictionaryArr[vInd].put(word, new Count(1));
+	    } else {
+	      count.count++;                
+	    }
+	  }          
+	}
       }
 
       //updating the docCount for the words that have occurred in this
@@ -1370,7 +1435,27 @@ public class StringToWordVector
 	  c.docCount++;
 	} else 
 	  System.err.println("Warning: A word should definitely be in the "+
-			     "dictionary.Please check the code");
+	      "dictionary.Please check the code");
+      }
+
+
+      if (pruneRate > 0) {
+	if (i % pruneRate == 0 && i > 0) {
+	  for (int z = 0; z < values; z++) {
+	    Vector d = new Vector(1000);
+	    Iterator it = dictionaryArr[z].keySet().iterator();
+	    while (it.hasNext()) {
+	      String word = (String)it.next();
+	      Count count = (Count)dictionaryArr[z].get(word);
+	      if (count.count <= 1) { d.add(word); }
+	    }
+	    Iterator iter = d.iterator();
+	    while(iter.hasNext()) {
+	      String word = (String)iter.next();
+	      dictionaryArr[z].remove(word);
+	    }
+	  }
+	}
       }
     }
 
@@ -1384,59 +1469,59 @@ public class StringToWordVector
       int pos = 0;
       Iterator it = dictionaryArr[z].keySet().iterator();
       while (it.hasNext()) {
-        String word = (String)it.next();
-        Count count = (Count)dictionaryArr[z].get(word);
-        array[pos] = count.count;
-        pos++;
+	String word = (String)it.next();
+	Count count = (Count)dictionaryArr[z].get(word);
+	array[pos] = count.count;
+	pos++;
       }
 
       // sort the array
       sortArray(array);
       if (array.length < m_WordsToKeep) {
-        // if there aren't enough words, set the threshold to
+	// if there aren't enough words, set the threshold to
 	// minFreq
-        prune[z] = m_minTermFreq;
+	prune[z] = m_minTermFreq;
       } else {
-        // otherwise set it to be at least minFreq
-        prune[z] = Math.max(m_minTermFreq, 
-			    array[array.length - m_WordsToKeep]);
+	// otherwise set it to be at least minFreq
+	prune[z] = Math.max(m_minTermFreq, 
+	    array[array.length - m_WordsToKeep]);
       }
     }
 
     // Convert the dictionary into an attribute index
     // and create one attribute per word
     FastVector attributes = new FastVector(totalsize +
-					   getInputFormat().numAttributes());
+	getInputFormat().numAttributes());
 
     // Add the non-converted attributes 
     int classIndex = -1;
     for (int i = 0; i < getInputFormat().numAttributes(); i++) {
       if (!m_SelectedRange.isInRange(i)) { 
-        if (getInputFormat().classIndex() == i) {
-          classIndex = attributes.size();
-        }
+	if (getInputFormat().classIndex() == i) {
+	  classIndex = attributes.size();
+	}
 	attributes.addElement(getInputFormat().attribute(i).copy());
       }     
     }
-    
+
     // Add the word vector attributes (eliminating duplicates
-    // that occur in multiple classes)
+	// that occur in multiple classes)
     TreeMap newDictionary = new TreeMap();
     int index = attributes.size();
     for(int z = 0; z < values; z++) {
       Iterator it = dictionaryArr[z].keySet().iterator();
       while (it.hasNext()) {
-        String word = (String)it.next();
-        Count count = (Count)dictionaryArr[z].get(word);
-        if (count.count >= prune[z]) {
-          if(newDictionary.get(word) == null) {
-            newDictionary.put(word, new Integer(index++));
-            attributes.addElement(new Attribute(m_Prefix + word));
-          }
-        }
+	String word = (String)it.next();
+	Count count = (Count)dictionaryArr[z].get(word);
+	if (count.count >= prune[z]) {
+	  if(newDictionary.get(word) == null) {
+	    newDictionary.put(word, new Integer(index++));
+	    attributes.addElement(new Attribute(m_Prefix + word));
+	  }
+	}
       }
     }
-    
+
     // Compute document frequencies
     m_DocsCounts = new int[attributes.size()];
     Iterator it = newDictionary.keySet().iterator();
@@ -1456,10 +1541,10 @@ public class StringToWordVector
     attributes.trimToSize();
     m_Dictionary = newDictionary;
     m_NumInstances = getInputFormat().numInstances();
-    
+
     // Set the filter's output format
     Instances outputFormat = new Instances(getInputFormat().relationName(), 
-                                           attributes, 0);
+	attributes, 0);
     outputFormat.setClassIndex(classIndex);
     setOutputFormat(outputFormat);
   }
@@ -1475,7 +1560,7 @@ public class StringToWordVector
 
     // Convert the instance into a sorted set of indexes
     TreeMap contained = new TreeMap();
-    
+
     // Copy all non-converted attributes from input to output
     int firstCopy = 0;
     for (int i = 0; i < getInputFormat().numAttributes(); i++) {
@@ -1484,14 +1569,14 @@ public class StringToWordVector
 	  // Add simple nominal and numeric attributes directly
 	  if (instance.value(i) != 0.0) {
 	    contained.put(new Integer(firstCopy), 
-			  new Double(instance.value(i)));
+		new Double(instance.value(i)));
 	  } 
 	} else {
 	  if (instance.isMissing(i)) {
 	    contained.put(new Integer(firstCopy),
-			  new Double(Instance.missingValue()));
+		new Double(Instance.missingValue()));
 	  } else {
-	    
+
 	    // If this is a string attribute, we have to first add
 	    // this value to the range of possible values, then add
 	    // its new internal index.
@@ -1499,47 +1584,47 @@ public class StringToWordVector
 	      // Note that the first string value in a
 	      // SparseInstance doesn't get printed.
 	      outputFormatPeek().attribute(firstCopy)
-		.addStringValue("Hack to defeat SparseInstance bug");
+	      .addStringValue("Hack to defeat SparseInstance bug");
 	    }
 	    int newIndex = outputFormatPeek().attribute(firstCopy)
-	      .addStringValue(instance.stringValue(i));
+	    .addStringValue(instance.stringValue(i));
 	    contained.put(new Integer(firstCopy), 
-			  new Double(newIndex));
+		new Double(newIndex));
 	  }
 	}
 	firstCopy++;
       }     
     }
-    
+
     for (int j = 0; j < instance.numAttributes(); j++) { 
       //if ((getInputFormat().attribute(j).type() == Attribute.STRING) 
       if (m_SelectedRange.isInRange(j)
 	  && (instance.isMissing(j) == false)) {          
-        
-        m_Tokenizer.tokenize(instance.stringValue(j));
-        
-        while (m_Tokenizer.hasMoreElements()) {
-          String word = (String)m_Tokenizer.nextElement(); 
-          if(this.m_lowerCaseTokens==true)
+
+	m_Tokenizer.tokenize(instance.stringValue(j));
+
+	while (m_Tokenizer.hasMoreElements()) {
+	  String word = (String)m_Tokenizer.nextElement(); 
+	  if(this.m_lowerCaseTokens==true)
 	    word = word.toLowerCase();
-          word = m_Stemmer.stem(word);
-          Integer index = (Integer) m_Dictionary.get(word);
-          if (index != null) {
-            if (m_OutputCounts) { // Separate if here rather than two lines down to avoid hashtable lookup
-              Double count = (Double)contained.get(index);
-              if (count != null) {
-                contained.put(index, new Double(count.doubleValue() + 1.0));
-              } else {
-                contained.put(index, new Double(1));
-              }
-            } else {
-              contained.put(index, new Double(1));
-            }                
-          }
-        }
+	  word = m_Stemmer.stem(word);
+	  Integer index = (Integer) m_Dictionary.get(word);
+	  if (index != null) {
+	    if (m_OutputCounts) { // Separate if here rather than two lines down to avoid hashtable lookup
+	      Double count = (Double)contained.get(index);
+	    if (count != null) {
+	      contained.put(index, new Double(count.doubleValue() + 1.0));
+	    } else {
+	      contained.put(index, new Double(1));
+	    }
+	    } else {
+	      contained.put(index, new Double(1));
+	    }                
+	  }
+	}
       }
     }
-    
+
     //Doing TFTransform
     if(m_TFTransform==true) {
       Iterator it = contained.keySet().iterator();
@@ -1552,7 +1637,7 @@ public class StringToWordVector
 	}
       }
     }
-    
+
     //Doing IDFTransform
     if(m_IDFTransform==true) {
       Iterator it = contained.keySet().iterator();
@@ -1561,12 +1646,12 @@ public class StringToWordVector
 	if( index.intValue() >= firstCopy ) {
 	  double val = ((Double)contained.get(index)).doubleValue();
 	  val = val*Math.log( m_NumInstances /
-			      (double) m_DocsCounts[index.intValue()] );
+	      (double) m_DocsCounts[index.intValue()] );
 	  contained.put(index, new Double(val));
 	}
       }        
     }
-    
+
     // Convert the set to structures needed to create a sparse instance.
     double [] values = new double [contained.size()];
     int [] indices = new int [contained.size()];
@@ -1579,14 +1664,14 @@ public class StringToWordVector
     }
 
     Instance inst = new SparseInstance(instance.weight(), values, indices, 
-                                       outputFormatPeek().numAttributes());
+	outputFormatPeek().numAttributes());
     inst.setDataset(outputFormatPeek());
 
     v.addElement(inst);
-    
+
     return firstCopy;    
   }
-  
+
   /**
    * Normalizes given instance to average doc length (only the newly
    * constructed attributes).
@@ -1596,7 +1681,7 @@ public class StringToWordVector
    * @throws Exception if avg. doc length not set
    */
   private void normalizeInstance(Instance inst, int firstCopy) 
-    throws Exception {
+  throws Exception {
 
     double docLength = 0;
 
@@ -1624,7 +1709,7 @@ public class StringToWordVector
       }
     }        
   }
-  
+
   /**
    * Main method for testing this class.
    *

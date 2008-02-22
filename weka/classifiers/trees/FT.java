@@ -16,7 +16,7 @@
 
 /*
  *    FT.java
- *    Copyright (C) 2004 University of Porto, Porto, Portugal
+ *    Copyright (C) 2007 University of Porto, Porto, Portugal
  *
  */
 
@@ -60,7 +60,7 @@ import java.util.Vector;
  * <br/>
  * Jo\~{a}o Gama (2004). Functional Trees.<br/>
  * <br/>
- * Marc Sumner, Eibe Frank, Mark Hall: Speeding up Logistic Model Tree Induction. In: 9th European Conference on Principles and Practice of Knowledge Discovery in Databases, 675-683, 2005.
+ * Niels Landwehr, Mark Hall, Eibe Frank (2005). Logistic Model Trees.
  * <p/>
  <!-- globalinfo-end -->
  *
@@ -94,10 +94,10 @@ import java.util.Vector;
  * Valid options are: <p/>
  * 
  * <pre> -B
- *  Binary splits (convert nominal attributes to binary ones)</pre>
- * 
- * <pre> -C
- *  Use cross-validation for boosting at all nodes </pre>
+ *  Binary splits(convert nominal attributes to binary ones) </pre> 
+ *   
+ * <pre> -P
+ *  Use error on probabilities instead of misclassification error for stopping criterion of LogitBoost.</pre>
  * 
  * <pre> -I &lt;numIterations&gt;
  *  Set fixed number of iterations for LogitBoost (instead of using cross-validation)</pre>
@@ -118,7 +118,7 @@ import java.util.Vector;
  *
  * @author Jo\~{a}o Gama
  * @author Carlos Ferreira  
- * @version $Revision: 1.1 $
+ * @version $Revision: 1.4 $
  */
 public class FT 
   extends Classifier 
@@ -126,23 +126,22 @@ public class FT
              TechnicalInformationHandler {
     
   /** for serialization */
-  static final long serialVersionUID = -1113212459618104943L;
+  static final long serialVersionUID = -1113212459618105000L;
   
   /** Filter to replace missing values*/
   protected ReplaceMissingValues m_replaceMissing;
   
-  /** Binary splits on nominal attributes? */
-  protected boolean m_binarySplits = false;
-  
-    
   /** Filter to replace nominal attributes*/
   protected NominalToBinary m_nominalToBinary;
     
   /** root of the logistic model tree*/
   protected FTtree m_tree;
-      
+  
   /** convert nominal attributes to binary ?*/
   protected boolean m_convertNominal;
+  
+  /**use error on probabilties instead of misclassification for stopping criterion of LogitBoost?*/
+  protected boolean m_errorOnProbabilities;
     
   /**minimum number of instances at which a node is considered for splitting*/
   protected int m_minNumInstances;
@@ -172,12 +171,13 @@ public class FT
     new Tag(MODEL_FTLeaves, "FTLeaves"),
     new Tag(MODEL_FTInner, "FTInner")
   };
+
   
   /**
    * Creates an instance of FT with standard options
    */
   public FT() {
-    m_numBoostingIterations=10;
+    m_numBoostingIterations=15;
     m_minNumInstances = 15;
     m_weightTrimBeta = 0;
     m_useAIC = false;
@@ -224,36 +224,31 @@ public class FT
     //replace missing values
     m_replaceMissing = new ReplaceMissingValues();
     m_replaceMissing.setInputFormat(filteredData);	
-    filteredData = Filter.useFilter(filteredData, m_replaceMissing);	
-	
+    filteredData = Filter.useFilter(filteredData, m_replaceMissing);
+    
     //possibly convert nominal attributes globally
     if (m_convertNominal) {	    
       m_nominalToBinary = new NominalToBinary();
       m_nominalToBinary.setInputFormat(filteredData);	
       filteredData = Filter.useFilter(filteredData, m_nominalToBinary);
     }
-
-    int minNumInstances = 2;
-	 
-    ModelSelection modSelection;
-    //create ModelSelection object, either Binary or Multi-way splits 
-    if (m_binarySplits)
-      modSelection = new BinC45ModelSelection(minNumInstances, filteredData);
-    else
-      modSelection = new C45ModelSelection(minNumInstances, filteredData);
-
-   
+	
+    int minNumInstances = 2;  
+    
+    
     //create a FT  tree root
     if (m_modelType==0)
-      m_tree = new FTNode(modSelection, m_numBoostingIterations, m_minNumInstances, m_weightTrimBeta, m_useAIC);
+      m_tree = new FTNode( m_errorOnProbabilities, m_numBoostingIterations, m_minNumInstances, 
+                           m_weightTrimBeta, m_useAIC);
                        
     //create a FTLeaves  tree root
-    if (m_modelType==1)
-      m_tree = new FTLeavesNode(modSelection, m_numBoostingIterations, m_minNumInstances, m_weightTrimBeta, m_useAIC);
-    
+    if (m_modelType==1){ 
+      m_tree = new FTLeavesNode(m_errorOnProbabilities, m_numBoostingIterations, m_minNumInstances, 
+                                m_weightTrimBeta, m_useAIC);
+    }
     //create a FTInner  tree root
     if (m_modelType==2)
-      m_tree = new FTInnerNode(modSelection, m_numBoostingIterations, m_minNumInstances, 
+      m_tree = new FTInnerNode(m_errorOnProbabilities, m_numBoostingIterations, m_minNumInstances, 
                                m_weightTrimBeta, m_useAIC);
         
     //build tree
@@ -261,10 +256,7 @@ public class FT
     // prune tree
     m_tree.prune();
     m_tree.assignIDs(0);
-    //clean 
-    if (modSelection instanceof C45ModelSelection) ((C45ModelSelection)modSelection).cleanup();
-    if (modSelection instanceof BinC45ModelSelection) ((BinC45ModelSelection)modSelection).cleanup();
-    
+    m_tree.cleanup();         
   }
   
   /** 
@@ -276,10 +268,10 @@ public class FT
    */
   public double [] distributionForInstance(Instance instance) throws Exception {
      
-
+    //replace missing values
     m_replaceMissing.input(instance);
-    instance = m_replaceMissing.output();	
-	
+    instance = m_replaceMissing.output();
+    
     //possibly convert nominal attributes
     if (m_convertNominal) {
       m_nominalToBinary.input(instance);
@@ -299,7 +291,7 @@ public class FT
 
     double maxProb = -1;
     int maxIndex = 0;
-      
+   
     //classify by maximum probability
     double[] probs = distributionForInstance(instance);       
     for (int j = 0; j < instance.numClasses(); j++) {
@@ -327,7 +319,7 @@ public class FT
           return "FT Inner tree \n------------------\n" + m_tree.toString();
       }
     }else{
-      return "No tree build";
+      return "No tree built";
     }
   }    
 
@@ -337,14 +329,14 @@ public class FT
    * @return an enumeration of all the available options.
    */
   public Enumeration listOptions() {
-    Vector newVector = new Vector(7);
+    Vector newVector = new Vector(8);
     
-    newVector.addElement(new Option("\tBinary splits (convert nominal attributes to binary ones)",
+    newVector.addElement(new Option("\tBinary splits (convert nominal attributes to binary ones) ",
                                     "B", 0, "-B"));
     
-    newVector.addElement(new Option("\tUse cross-validation for boosting at all nodes ",
-                                    "C", 0, "-C"));
-    
+    newVector.addElement(new Option("\tUse error on probabilities instead of misclassification error "+
+                                    "for stopping criterion of LogitBoost.",
+                                    "P", 0, "-P"));
     
     newVector.addElement(new Option("\tSet fixed number of iterations for LogitBoost (instead of using "+
                                     "cross-validation)",
@@ -375,8 +367,8 @@ public class FT
    * <pre> -B
    *  Binary splits (convert nominal attributes to binary ones)</pre>
    * 
-   * <pre> -C
-   *  Use cross-validation for boosting at all nodes </pre>
+   * <pre> -P
+   *  Use error on probabilities instead of misclassification error for stopping criterion of LogitBoost.</pre>
    * 
    * <pre> -I &lt;numIterations&gt;
    *  Set fixed number of iterations for LogitBoost (instead of using cross-validation)</pre>
@@ -400,9 +392,8 @@ public class FT
    */
   public void setOptions(String[] options) throws Exception {
 
-    setConvertNominal(Utils.getFlag('B', options));
-    setCrossValidation(Utils.getFlag('C', options));
-  
+    setBinSplit(Utils.getFlag('B', options));
+    setErrorOnProbabilities(Utils.getFlag('P', options));
 
     String optionString = Utils.getOption('I', options);
     if (optionString.length() != 0) {
@@ -412,6 +403,7 @@ public class FT
     optionString = Utils.getOption('F', options);
     if (optionString.length() != 0) {
       setModelType(new SelectedTag(Integer.parseInt(optionString), TAGS_MODEL));
+      // setModelType((new Integer(optionString)).intValue());
     }
     
     optionString = Utils.getOption('M', options);
@@ -426,7 +418,8 @@ public class FT
     
     setUseAIC(Utils.getFlag('A', options));        
     
-    Utils.checkForRemainingOptions(options);	
+    Utils.checkForRemainingOptions(options);
+	
   } 
     
   /**
@@ -438,18 +431,19 @@ public class FT
     String[] options = new String[11];
     int current = 0;
 
-    if (getConvertNominal()) {
+    if (getBinSplit()) {
       options[current++] = "-B";
     } 
-
-    if (getCrossValidation()) {
-      options[current++] = "-C";
-    } 
-	
+    
+    if (getErrorOnProbabilities()) {
+      options[current++] = "-P";
+    }
+    
     options[current++] = "-I"; 
     options[current++] = ""+getNumBoostingIterations();
     
     options[current++] = "-F"; 
+    //    options[current++] = ""+getModelType();
     options[current++] = ""+getModelType().getSelectedTag().getID();
 
     options[current++] = "-M"; 
@@ -485,13 +479,6 @@ public class FT
     return m_useAIC;
   }
  
-  /**
-   * Set Cross Validation for LogitBoost.
-   *
-   */
-  public void setCrossValidation(boolean c){
-    if (c==true)  m_numBoostingIterations=-1;
-  }
   
   /**
    * Set the value of weightTrimBeta.
@@ -510,15 +497,23 @@ public class FT
   }
   
   /**
-   * Get the value of convertNominal.
+   * Get the value of binarySplits.
    *
-   * @return Value of convertNominal.
+   * @return Value of binarySplits.
    */
-  public boolean getConvertNominal(){
+  public boolean getBinSplit(){
     return m_convertNominal;
   }
 
-    
+  /**
+   * Get the value of errorOnProbabilities.
+   *
+   * @return Value of errorOnProbabilities.
+   */
+  public boolean getErrorOnProbabilities(){
+    return m_errorOnProbabilities;
+  }
+  
   /**
    * Get the value of numBoostingIterations.
    *
@@ -528,14 +523,19 @@ public class FT
     return m_numBoostingIterations;
   }
   
-  public boolean getCrossValidation(){
-    return m_numBoostingIterations==-1;
+  /**
+   * Get the type of functional tree model being used.
+   *
+   * @return the type of functional tree model.
+   */
+  public SelectedTag getModelType() {
+    return new SelectedTag(m_modelType, TAGS_MODEL);
   } 
- 
+
   /**
    * Set the Functional Tree type.
    *
-   * @param c Value corresponding to tree type
+   * @param c Value corresponding to tree type.
    */
   public void setModelType(SelectedTag newMethod){
     if (newMethod.getTags() == TAGS_MODEL) {
@@ -548,10 +548,6 @@ public class FT
       }
     }
   }
-
-  public SelectedTag getModelType() {
-    return new SelectedTag(m_modelType, TAGS_MODEL);
-  }
   
   /**
    * Get the value of minNumInstances.
@@ -563,14 +559,22 @@ public class FT
   }
     
   /**
-   * Set the value of convertNominal.
+   * Set the value of binarySplits.
    *
-   * @param c Value to assign to convertNominal.
+   * @param c Value to assign to binarySplits.
    */
-  public void setConvertNominal(boolean c){
-    m_convertNominal = c;
+  public void setBinSplit(boolean c){
+    m_convertNominal=c;
   }
 
+  /**
+   * Set the value of errorOnProbabilities.
+   *
+   * @param c Value to assign to errorOnProbabilities.
+   */
+  public void setErrorOnProbabilities(boolean c){
+    m_errorOnProbabilities = c;
+  }
   
   /**
    * Set the value of numBoostingIterations.
@@ -580,21 +584,7 @@ public class FT
   public void setNumBoostingIterations(int c){
     m_numBoostingIterations = c;
   }
-  
-  /**
-   * Set the Functional Tree type.
-   *
-   * @param c Value corresponding to tree type
-   */
-  public void setModelType(int c){
-    if (c==0 || c==1 || c==2)
-      m_modelType = c;
-    else 
-      throw new IllegalArgumentException("Wrong model type, -F value should be: 0, for FT, 1, " +
-                                         "for FTLeaves, and 2, for FTInner "); 
-              
-  }
- 
+   
   /**
    * Set the value of minNumInstances.
    *
@@ -677,8 +667,8 @@ public class FT
    */
   public String globalInfo() {
     return "Classifier for building 'Functional trees', which are classification trees  that could have "
-      +"logistic regression functions at the inner nodes and/or leaves. The algorithm can deal with binary and multi-class "
-      +"target variables, numeric and nominal attributes and missing values.\n\n"
+      +"logistic regression functions at the inner nodes and/or leaves. The algorithm can deal with " 
+      +"binary and multi-class target variables, numeric and nominal attributes and missing values.\n\n"
       +"For more information see: \n\n"
       + getTechnicalInformation().toString();
   }
@@ -704,14 +694,14 @@ public class FT
     result.setValue(Field.PAGES, "219-250");
     result.setValue(Field.NUMBER, "3");
     
-    result = new TechnicalInformation(Type.ARTICLE);
-    result.setValue(Field.AUTHOR, "Niels Landwehr and Mark Hall and Eibe Frank");
-    result.setValue(Field.TITLE, "Logistic Model Trees");
-    result.setValue(Field.BOOKTITLE, "Machine Learning");
-    result.setValue(Field.YEAR, "2005");
-    result.setValue(Field.VOLUME, "95");
-    result.setValue(Field.PAGES, "161-205");
-    result.setValue(Field.NUMBER, "1-2");
+    additional = result.add(Type.ARTICLE);
+    additional.setValue(Field.AUTHOR, "Niels Landwehr and Mark Hall and Eibe Frank");
+    additional.setValue(Field.TITLE, "Logistic Model Trees");
+    additional.setValue(Field.BOOKTITLE, "Machine Learning");
+    additional.setValue(Field.YEAR, "2005");
+    additional.setValue(Field.VOLUME, "95");
+    additional.setValue(Field.PAGES, "161-205");
+    additional.setValue(Field.NUMBER, "1-2");
     
     return result;
   }
@@ -731,9 +721,10 @@ public class FT
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
-  public String convertNominalTipText() {
+  public String binSplitTipText() {
     return "Convert all nominal attributes to binary ones before building the tree. "
       +"This means that all splits in the final tree will be binary.";
+    
   } 
   
   /**
@@ -741,9 +732,11 @@ public class FT
    * @return tip text for this property suitable for
    * displaying in the explorer/experimenter gui
    */
-  public String crossValidationTipText() {
-    return "Determines the number of Logit-Boost iterations using cross-validating at all nodes. ";
-  }
+  public String errorOnProbabilitiesTipText() {
+    return "Minimize error on probabilities instead of misclassification error when cross-validating the number "
+      +"of LogitBoost iterations. When set, the number of LogitBoost iterations is chosen that minimizes "
+      +"the root mean squared error instead of the misclassification error.";	   
+  } 
   
   /**
    * Returns the tip text for this property
@@ -764,9 +757,7 @@ public class FT
     return "Set the minimum number of instances at which a node is considered for splitting. "
       +"The default value is 15.";
   } 
-  
- 
-    
+      
   /**
    * Returns the tip text for this property
    * @return tip text for this property suitable for
@@ -788,8 +779,7 @@ public class FT
     return "The AIC is used to determine when to stop LogitBoost iterations. "
       +"The default is not to use AIC.";
   }
-
-    
+  
   /**
    * Main method for testing this class
    *

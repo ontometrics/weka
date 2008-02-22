@@ -15,10 +15,10 @@
  */
 
 /*
- * Copyright 2007 University of Waikato
+ * Copyright 2008 University of Waikato
  */
 
-package weka.classifiers.trees;
+package weka.classifiers.bayes;
 
 import weka.classifiers.AbstractClassifierTest;
 import weka.classifiers.Classifier;
@@ -27,23 +27,23 @@ import junit.framework.Test;
 import junit.framework.TestSuite;
 
 /**
- * Tests FT. Run from the command line with:<p>
- * java weka.classifiers.trees.FT8Test
+ * Tests BayesianLogisticRegression. Run from the command line with:<p>
+ * java weka.classifiers.bayes.BayesianLogisticRegressionTest
  *
- * @author mhall{[at]}pentaho{[dot]}org
+ * @author Mark Hall
  * @version $Revision: 1.1 $
  */
-public class FTTest extends AbstractClassifierTest {
+public class BayesianLogisticRegressionTest extends AbstractClassifierTest {
 
-  public FTTest(String name) { super(name);  }
+  public BayesianLogisticRegressionTest(String name) { super(name);  }
 
-  /** Creates a default J48 */
+  /** Creates a default BayesianLogisticRegression */
   public Classifier getClassifier() {
-    return new FT();
+    return new BayesianLogisticRegression();
   }
 
   public static Test suite() {
-    return new TestSuite(FTTest.class);
+    return new TestSuite(BayesianLogisticRegressionTest.class);
   }
 
   public static void main(String[] args){
